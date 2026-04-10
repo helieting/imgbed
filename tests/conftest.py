@@ -4,7 +4,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db import get_conn, init_db
+from app.db import get_conn
 from app.main import app
 
 
@@ -15,11 +15,13 @@ async def client():
     关键概念：
     - ASGITransport: 让 httpx 直接调用 FastAPI，不需要启动真实服务器
     - base_url: 随便填一个，因为请求不会真的走网络
-    - async with: 确保客户端用完后正确关闭
+    - async with app.router.lifespan_context: 触发 FastAPI 的 lifespan，
+      确保 init_db() 和 arq 连接池初始化执行
     """
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +32,6 @@ def clean_db():
     - autouse=True: 不需要显式传入，每个测试自动使用
     - yield 前面是 setup（测试前），yield 后面是 teardown（测试后）
     """
-    init_db()
     yield
     with get_conn() as conn:
         conn.execute("DELETE FROM images")

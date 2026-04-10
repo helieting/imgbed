@@ -63,23 +63,39 @@ async def test_get_image_not_found(client):
 
 
 @pytest.mark.anyio
-async def test_upload_returns_thumbnail_url(client):
-    """上传图片后，返回数据中应该包含缩略图 url。"""
+async def test_upload_does_not_return_thumbnail_url(client):
+    """上传图片后，返回里不包含 thumbnail_url（缩略图异步生成）。"""
     png_bytes = _make_png(800, 600)
     resp = await client.post(
         "/upload",
         files={"file": ("big.png", png_bytes, "image/png")},
     )
     data = resp.json()
-    assert "thumbnail_url" in data
+    assert "thumbnail_url" not in data
 
 
 @pytest.mark.anyio
-async def test_thumbnail_is_smaller(client):
-    """缩略图尺寸应不超过 200x200，且保持比例。"""
+async def test_thumbnail_not_ready_before_worker(client):
+    """worker 处理前，缩略图端点返回 404。"""
+    png_bytes = _make_png(800, 600)
+    resp = await client.post(
+        "/upload",
+        files={"file": ("big.png", png_bytes, "image/png")},
+    )
+    image_id = resp.json()["id"]
+
+    thumb_resp = await client.get(f"/i/{image_id}/thumbnail")
+    assert thumb_resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_thumbnail_available_after_worker(client):
+    """直接调用任务函数后，缩略图可正常获取且尺寸正确。"""
     import io
 
     from PIL import Image
+
+    from app.worker import generate_thumbnail
 
     # 上传一张 800x600 的图
     png_bytes = _make_png(800, 600)
@@ -87,17 +103,18 @@ async def test_thumbnail_is_smaller(client):
         "/upload",
         files={"file": ("big.png", png_bytes, "image/png")},
     )
-    thumbnail_url = resp.json()["thumbnail_url"]
+    image_id = resp.json()["id"]
 
-    # 获取缩略图
-    thumb_resp = await client.get(thumbnail_url)
+    # 模拟 worker：直接调用任务函数，ctx 传空字典即可
+    await generate_thumbnail({}, image_id=image_id)
+
+    # 现在缩略图应该可以获取了
+    thumb_resp = await client.get(f"/i/{image_id}/thumbnail")
     assert thumb_resp.status_code == 200
 
-    # 验证尺寸：不超过 200x200，且保持原始 4:3 比例
     thumb = Image.open(io.BytesIO(thumb_resp.content))
     assert thumb.width <= 200
     assert thumb.height <= 200
-    # 800x600 缩到 200 宽 → 高应该是 150（4:3 比例）
     assert thumb.size == (200, 150)
 
 
