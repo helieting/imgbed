@@ -4,7 +4,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db import get_conn
+from app.db import get_conn, init_db
 from app.main import app
 
 
@@ -24,12 +24,13 @@ async def client():
 
 @pytest.fixture(autouse=True)
 def clean_db():
-    """每个测试运行后清空 images 表，保证测试之间互不影响。
+    """每个测试前确保表存在，测试后清空数据。
 
     关键概念：
     - autouse=True: 不需要显式传入，每个测试自动使用
     - yield 前面是 setup（测试前），yield 后面是 teardown（测试后）
     """
+    init_db()
     yield
     with get_conn() as conn:
         conn.execute("DELETE FROM images")

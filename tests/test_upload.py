@@ -17,7 +17,7 @@ async def test_upload_image(client):
     """上传一张图片，验证返回 id 和 url。"""
     # 构造一个假的 PNG 文件（1x1 像素的最小 PNG）
     # files 参数模拟浏览器的 multipart 表单上传
-    png_bytes = _minimal_png()
+    png_bytes = _make_png()
     resp = await client.post(
         "/upload",
         files={"file": ("test.png", png_bytes, "image/png")},
@@ -42,7 +42,7 @@ async def test_upload_rejects_non_image(client):
 @pytest.mark.anyio
 async def test_get_image(client):
     """上传后用返回的 url 获取图片，验证内容一致。"""
-    png_bytes = _minimal_png()
+    png_bytes = _make_png()
     upload_resp = await client.post(
         "/upload",
         files={"file": ("test.png", png_bytes, "image/png")},
@@ -62,35 +62,55 @@ async def test_get_image_not_found(client):
     assert resp.status_code == 404
 
 
-def _minimal_png() -> bytes:
-    """生成一个 1x1 像素的最小合法 PNG 文件。
+@pytest.mark.anyio
+async def test_upload_returns_thumbnail_url(client):
+    """上传图片后，返回数据中应该包含缩略图 url。"""
+    png_bytes = _make_png(800, 600)
+    resp = await client.post(
+        "/upload",
+        files={"file": ("big.png", png_bytes, "image/png")},
+    )
+    data = resp.json()
+    assert "thumbnail_url" in data
 
-    比起从磁盘读图片，硬编码字节更可靠——测试不依赖外部文件。
+
+@pytest.mark.anyio
+async def test_thumbnail_is_smaller(client):
+    """缩略图尺寸应不超过 200x200，且保持比例。"""
+    import io
+
+    from PIL import Image
+
+    # 上传一张 800x600 的图
+    png_bytes = _make_png(800, 600)
+    resp = await client.post(
+        "/upload",
+        files={"file": ("big.png", png_bytes, "image/png")},
+    )
+    thumbnail_url = resp.json()["thumbnail_url"]
+
+    # 获取缩略图
+    thumb_resp = await client.get(thumbnail_url)
+    assert thumb_resp.status_code == 200
+
+    # 验证尺寸：不超过 200x200，且保持原始 4:3 比例
+    thumb = Image.open(io.BytesIO(thumb_resp.content))
+    assert thumb.width <= 200
+    assert thumb.height <= 200
+    # 800x600 缩到 200 宽 → 高应该是 150（4:3 比例）
+    assert thumb.size == (200, 150)
+
+
+def _make_png(width: int = 1, height: int = 1) -> bytes:
+    """用 Pillow 生成指定尺寸的纯色 PNG。
+
+    比手动拼字节更灵活，可以指定任意尺寸来测试缩略图。
     """
-    import struct
-    import zlib
+    import io
 
-    # PNG 文件结构：签名 + IHDR chunk + IDAT chunk + IEND chunk
-    signature = b"\x89PNG\r\n\x1a\n"
+    from PIL import Image
 
-    # IHDR: 宽1 高1 位深8 颜色类型2(RGB)
-    ihdr_data = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-    ihdr = _png_chunk(b"IHDR", ihdr_data)
-
-    # IDAT: 图像数据（1个像素，RGB 各为0，前面加 filter byte 0）
-    raw = b"\x00\x00\x00\x00"
-    idat = _png_chunk(b"IDAT", zlib.compress(raw))
-
-    # IEND: 结束标记
-    iend = _png_chunk(b"IEND", b"")
-
-    return signature + ihdr + idat + iend
-
-
-def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
-    """构造一个 PNG chunk：长度(4字节) + 类型(4字节) + 数据 + CRC(4字节)。"""
-    import struct
-    import zlib
-
-    chunk = chunk_type + data
-    return struct.pack(">I", len(data)) + chunk + struct.pack(">I", zlib.crc32(chunk) & 0xFFFFFFFF)
+    img = Image.new("RGB", (width, height), color=(255, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
