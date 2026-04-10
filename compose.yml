@@ -9,6 +9,14 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://imgbed:imgbed@db:5432/imgbed
+    depends_on:
+      - db
 
 volumes:
   pgdata:
