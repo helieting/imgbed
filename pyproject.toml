@@ -10,3 +10,10 @@ dependencies = [
     "python-multipart>=0.0.24",
     "uvicorn[standard]>=0.44.0",
 ]
+
+[dependency-groups]
+dev = [
+    "anyio>=4.13.0",
+    "httpx>=0.28.1",
+    "pytest>=9.0.3",
+]
