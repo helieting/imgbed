@@ -8,13 +8,11 @@ from pathlib import Path
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, UploadFile, Response
 
 from app.db import get_conn, init_db
+import app.storage as storage
 
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
@@ -42,15 +40,17 @@ async def upload(file: UploadFile):
     
     image_id = uuid.uuid4().hex[:10]
     suffix = Path(file.filename or "").suffix
-    dest = UPLOAD_DIR / f"{image_id}{suffix}"
+    key =  f"{image_id}{suffix}"
     content = await file.read()
-    dest.write_bytes(content)
+    await storage.upload(key, content, file.content_type)
+
+
 
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO images (id, filename, content_type, path) "
             "VALUES (%s, %s, %s, %s)",
-            (image_id, file.filename, file.content_type, str(dest)),
+            (image_id, file.filename, file.content_type, key),
         )
     # 往队列塞任务，worker 会异步生成缩略图
     await app.state.arq.enqueue_job("generate_thumbnail", image_id=image_id)
@@ -58,7 +58,7 @@ async def upload(file: UploadFile):
     return {"id": image_id, "url": f"/i/{image_id}"}
 
 @app.get("/i/{image_id}")
-def get_image(image_id: str):
+async def get_image(image_id: str):
     with get_conn() as conn:
         row = conn.execute(
             "SELECT path, content_type FROM images WHERE id = %s",
@@ -67,11 +67,12 @@ def get_image(image_id: str):
     if not row:
         raise HTTPException(404)
     path, content_type = row
-    return FileResponse(path, media_type=content_type)
+    data = await storage.download(path)
+    return Response(content=data, media_type=content_type)
 
 
 @app.get("/i/{image_id}/thumbnail")
-def get_thumbnail(image_id: str):
+async def get_thumbnail(image_id: str):
     with get_conn() as conn:
         row = conn.execute(
             "SELECT thumbnail_path, content_type FROM images WHERE id = %s",
@@ -80,6 +81,6 @@ def get_thumbnail(image_id: str):
     if not row or not row[0]:
         raise HTTPException(404)
     path, content_type = row
-    return FileResponse(path, media_type=content_type)
-
+    data = await storage.download(path)
+    return Response(content=data, media_type=content_type)
 

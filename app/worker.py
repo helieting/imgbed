@@ -2,16 +2,14 @@
 # ABOUTME: 由 arq worker 进程消费 Redis 队列中的任务
 
 import os
-from pathlib import Path
+import io
 
 from arq.connections import RedisSettings
 from PIL import Image
 
 from app.db import get_conn
+import app.storage as storage
 
-UPLOAD_DIR = Path("uploads")
-THUMB_DIR = UPLOAD_DIR / "thumbnails"
-THUMB_DIR.mkdir(parents=True, exist_ok=True)
 
 THUMB_MAX_SIZE = (200, 200)
 
@@ -33,17 +31,23 @@ async def generate_thumbnail(ctx: dict, *, image_id: str) -> None:
     if not row:
         return
 
-    path = row[0]
-    img = Image.open(path)
-    img.thumbnail(THUMB_MAX_SIZE)
 
-    thumb_path = THUMB_DIR / Path(path).name
-    img.save(thumb_path)
+    key = row[0]
+    data = await storage.download(key)
+    img = Image.open(io.BytesIO(data))
+
+    img.thumbnail(THUMB_MAX_SIZE)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    thumb_bytes = buf.getvalue()
+
+    thumb_key = f"thumbnails/{key}"
+    await storage.upload(thumb_key, thumb_bytes, "image/png")
 
     with get_conn() as conn:
         conn.execute(
             "UPDATE images SET thumbnail_path = %s WHERE id = %s",
-            (str(thumb_path), image_id),
+            (thumb_key, image_id),
         )
 
 
