@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>imgbed</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        h1 { margin-bottom: 20px; }
+
+        .upload-area {
+            border: 2px dashed #ccc; border-radius: 8px; padding: 40px;
+            text-align: center; background: #fff; margin-bottom: 20px; cursor: pointer;
+        }
+        .upload-area:hover { border-color: #666; }
+        .upload-area input { display: none; }
+
+        .images { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+        .image-card {
+            background: #fff; border-radius: 8px; overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .image-card img { width: 100%; height: 150px; object-fit: cover; }
+        .image-card .info { padding: 10px; }
+        .image-card .filename { font-size: 14px; color: #333; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .image-card .actions { display: flex; gap: 8px; }
+        .image-card button {
+            flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px;
+            background: #fff; cursor: pointer; font-size: 12px;
+        }
+        .image-card button:hover { background: #f0f0f0; }
+
+        .toast {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #333; color: #fff; padding: 10px 20px; border-radius: 4px;
+            display: none; font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>imgbed</h1>
+
+    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+        <p>点击或拖拽上传图片</p>
+        <input type="file" id="fileInput" accept="image/*" multiple>
+    </div>
+
+    <div class="images">
+        {% for img in images %}
+        <div class="image-card">
+            <img src="/i/{{ img.id }}/thumbnail" alt="{{ img.filename }}"
+                 onerror="this.src='/i/{{ img.id }}'">
+            <div class="info">
+                <div class="filename">{{ img.filename }}</div>
+                <div class="actions">
+                    <button onclick="copyLink('{{ host }}/i/{{ img.id }}')">复制链接</button>
+                    <button onclick="window.open('/i/{{ img.id }}')">查看原图</button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="toast" id="toast">已复制</div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.querySelector('.upload-area');
+
+        fileInput.addEventListener('change', async (e) => {
+            for (const file of e.target.files) {
+                await uploadFile(file);
+            }
+            location.reload();
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#666';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.borderColor = '#ccc';
+        });
+
+        uploadArea.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ccc';
+            for (const file of e.dataTransfer.files) {
+                await uploadFile(file);
+            }
+            location.reload();
+        });
+
+        async function uploadFile(file) {
+            const form = new FormData();
+            form.append('file', file);
+            await fetch('/upload', { method: 'POST', body: form });
+        }
+
+        function copyLink(url) {
+            navigator.clipboard.writeText(url);
+            const toast = document.getElementById('toast');
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 1500);
+        }
+    </script>
+</body>
+</html>

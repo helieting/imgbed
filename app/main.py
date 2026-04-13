@@ -8,10 +8,13 @@ from pathlib import Path
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import FastAPI, HTTPException, UploadFile, Response
+from fastapi import FastAPI, HTTPException, Request, UploadFile, Response
+from fastapi.templating import Jinja2Templates
 
 from app.db import get_conn, init_db
 import app.storage as storage
+
+templates = Jinja2Templates(directory="app/templates")
 
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
@@ -27,6 +30,20 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/")
+def index(request: Request):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, filename FROM images ORDER BY created_at DESC"
+        ).fetchall()
+    images = [{"id": r[0], "filename": r[1]} for r in rows]
+    host = str(request.base_url).rstrip("/")
+    return templates.TemplateResponse(request, "index.html", {
+        "images": images,
+        "host": host,
+    })
 
 
 @app.get("/health")
